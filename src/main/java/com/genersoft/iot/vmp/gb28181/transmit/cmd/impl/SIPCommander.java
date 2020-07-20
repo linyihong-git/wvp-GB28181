@@ -1,20 +1,25 @@
 package com.genersoft.iot.vmp.gb28181.transmit.cmd.impl;
 
 import java.text.ParseException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.sip.ClientTransaction;
 import javax.sip.Dialog;
 import javax.sip.InvalidArgumentException;
 import javax.sip.SipException;
+import javax.sip.SipFactory;
+import javax.sip.SipProvider;
 import javax.sip.TransactionDoesNotExistException;
+import javax.sip.address.SipURI;
 import javax.sip.header.ViaHeader;
 import javax.sip.message.Request;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import com.genersoft.iot.vmp.conf.SipConfig;
-import com.genersoft.iot.vmp.gb28181.SipLayer;
 import com.genersoft.iot.vmp.gb28181.bean.Device;
 import com.genersoft.iot.vmp.gb28181.session.VideoStreamSessionManager;
 import com.genersoft.iot.vmp.gb28181.transmit.cmd.ISIPCommander;
@@ -23,7 +28,7 @@ import com.genersoft.iot.vmp.gb28181.utils.DateUtil;
 
 /**    
  * @Description:设备能力接口，用于定义设备的控制、查询能力   
- * @author: songww
+ * @author: swwheihei
  * @date:   2020年5月3日 下午9:22:48     
  */
 @Component
@@ -36,10 +41,15 @@ public class SIPCommander implements ISIPCommander {
 	private SIPRequestHeaderProvider headerProvider;
 	
 	@Autowired
-	private SipLayer sipLayer;
+	private VideoStreamSessionManager streamSession;
 	
 	@Autowired
-	private VideoStreamSessionManager streamSession;
+	@Qualifier(value="tcpSipProvider")
+	private SipProvider tcpSipProvider;
+	
+	@Autowired
+	@Qualifier(value="udpSipProvider")
+	private SipProvider udpSipProvider;
 	
 	/**
 	 * 云台方向放控制，使用配置文件中的默认镜头移动速度
@@ -288,18 +298,27 @@ public class SIPCommander implements ISIPCommander {
 				return;
 			}
 			Request byeRequest = dialog.createRequest(Request.BYE);
+			SipURI byeURI = (SipURI) byeRequest.getRequestURI();
+			String vh = transaction.getRequest().getHeader(ViaHeader.NAME).toString();
+			Pattern p = Pattern.compile("(\\d+\\.\\d+\\.\\d+\\.\\d+)\\:(\\d+)");
+			Matcher matcher = p.matcher(vh);
+			if (matcher.find()) {
+				byeURI.setHost(matcher.group(1));
+			}
 			ViaHeader viaHeader = (ViaHeader) byeRequest.getHeader(ViaHeader.NAME);
 			String protocol = viaHeader.getTransport().toUpperCase();
 			ClientTransaction clientTransaction = null;
 			if("TCP".equals(protocol)) {
-				clientTransaction = sipLayer.getTcpSipProvider().getNewClientTransaction(byeRequest);
+				clientTransaction = tcpSipProvider.getNewClientTransaction(byeRequest);
 			} else if("UDP".equals(protocol)) {
-				clientTransaction = sipLayer.getUdpSipProvider().getNewClientTransaction(byeRequest);
+				clientTransaction = udpSipProvider.getNewClientTransaction(byeRequest);
 			}
 			dialog.sendRequest(clientTransaction);
 		} catch (TransactionDoesNotExistException e) {
 			e.printStackTrace();
 		} catch (SipException e) {
+			e.printStackTrace();
+		} catch (ParseException e) {
 			e.printStackTrace();
 		}
 	}
@@ -526,9 +545,9 @@ public class SIPCommander implements ISIPCommander {
 	private ClientTransaction transmitRequest(Device device, Request request) throws SipException {
 		ClientTransaction clientTransaction = null;
 		if("TCP".equals(device.getTransport())) {
-			clientTransaction = sipLayer.getTcpSipProvider().getNewClientTransaction(request);
+			clientTransaction = tcpSipProvider.getNewClientTransaction(request);
 		} else if("UDP".equals(device.getTransport())) {
-			clientTransaction = sipLayer.getUdpSipProvider().getNewClientTransaction(request);
+			clientTransaction = udpSipProvider.getNewClientTransaction(request);
 		}
 		clientTransaction.sendRequest();
 		return clientTransaction;
